@@ -17,6 +17,9 @@ import Let from './Let';
 import TemplateScope from './shared/TemplateScope';
 import { INode } from './interfaces';
 
+// Testing
+import { elementRoles, roles } from 'aria-query';
+
 const svg = /^(?:altGlyph|altGlyphDef|altGlyphItem|animate|animateColor|animateMotion|animateTransform|circle|clipPath|color-profile|cursor|defs|desc|discard|ellipse|feBlend|feColorMatrix|feComponentTransfer|feComposite|feConvolveMatrix|feDiffuseLighting|feDisplacementMap|feDistantLight|feDropShadow|feFlood|feFuncA|feFuncB|feFuncG|feFuncR|feGaussianBlur|feImage|feMerge|feMergeNode|feMorphology|feOffset|fePointLight|feSpecularLighting|feSpotLight|feTile|feTurbulence|filter|font|font-face|font-face-format|font-face-name|font-face-src|font-face-uri|foreignObject|g|glyph|glyphRef|hatch|hatchpath|hkern|image|line|linearGradient|marker|mask|mesh|meshgradient|meshpatch|meshrow|metadata|missing-glyph|mpath|path|pattern|polygon|polyline|radialGradient|rect|set|solidcolor|stop|svg|switch|symbol|text|textPath|tref|tspan|unknown|use|view|vkern)$/;
 
 const aria_attributes = 'activedescendant atomic autocomplete busy checked colcount colindex colspan controls current describedby details disabled dropeffect errormessage expanded flowto grabbed haspopup hidden invalid keyshortcuts label labelledby level live modal multiline multiselectable orientation owns placeholder posinset pressed readonly relevant required roledescription rowcount rowindex rowspan selected setsize sort valuemax valuemin valuenow valuetext'.split(' ');
@@ -59,6 +62,12 @@ const a11y_required_content = new Set([
 const a11y_no_onchange = new Set([
 	'select',
 	'option'
+]);
+
+const a11y_click_events_key_events = new Set([
+	'onKeyUp',
+	'onKeyDown',
+	'onKeyPress'
 ]);
 
 const invisible_elements = new Set(['meta', 'html', 'script', 'style']);
@@ -281,6 +290,7 @@ export default class Element extends Node {
 		this.validate_bindings();
 		this.validate_content();
 		this.validate_event_handlers();
+		this.validate_a11y_click_events();
 	}
 
 	validate_attributes() {
@@ -765,6 +775,115 @@ export default class Element extends Node {
 				handler.modifiers.add('passive');
 			}
 		});
+	}
+
+	is_hidden_from_screen_reader() {
+		const hiddenAttribute = this.attributes.find(attr => attr.name.toLowerCase() === 'hidden');
+		const ariaHiddenAttribute = this.attributes.find(attr => attr.name.toLowerCase() === 'aria-hidden');
+		const roleAttribute = this.attributes.find(attr => attr.name.toLowerCase() === 'role');
+		// const roleValueRegex = /none|presentation/;
+
+		// hidden attribute
+		if (hiddenAttribute && (hiddenAttribute.is_true || hiddenAttribute.get_static_value() === 'true')) {
+			return true;
+		}
+		// aria-hidden attribute
+		if (ariaHiddenAttribute && (ariaHiddenAttribute.is_true || ariaHiddenAttribute.get_static_value() === 'true')) {
+			return true;
+		}
+		// role=none or role=presentation removes semantics from the element
+		if (roleAttribute && (roleAttribute.get_static_value() === 'none' || roleAttribute.get_static_value() === 'presentation'))
+			return true;
+
+		return false;
+	}
+
+	//#region Interactive Elements
+
+	interactiveRoles = new Set([...roles.keys()]
+		.filter((name) => {
+			const role = roles.get(name);
+			return (
+				!role.abstract &&
+				name !== 'progressbar' &&
+				role.superClass.some(classes => classes.includes('widget'))
+			);
+		})
+		.concat('toolbar')
+	);
+
+	interactiveRoleSchemas = [...elementRoles]
+		.reduce((
+			accumulator,
+			[
+				elementSchema,
+				roleSet,
+			],
+			) => {
+				if (this.name === 'details')
+					console.log(elementSchema, roleSet);
+			if ([...roleSet].some(role => {
+				this.interactiveRoles.has(role);
+			})) {
+				accumulator.push(elementSchema);
+			}
+			return accumulator;
+		}, []);
+
+	is_interactive() {
+		if (this.name === 'details') {
+			console.log(this.interactiveRoleSchemas);
+			console.log(this.interactiveRoles);
+		}
+		const attribute_comparator = (baseAttributes, attributes: Attribute[]) => {
+			if (this.name === 'details') console.log(baseAttributes);
+			baseAttributes.every(baseAttr => {
+				attributes.some(attr => {
+					// Attributes do not match.
+					if (baseAttr.name !== attr.name) {
+						return false;
+					}
+					// Attribute's values do not match
+					if (baseAttr.value !== attr.get_static_value()) {
+						return false;
+					}
+					return true;	
+				});
+			});
+		};
+
+		const schema_matcher = (schema) => {
+			return (
+				this.name === schema.name &&
+				attribute_comparator(schema.attributes, this.attributes)
+			);
+		};
+
+		const isInherentlyInteractive = this.interactiveRoleSchemas.some(schema_matcher);
+		if (isInherentlyInteractive) {
+			return true;
+		}
+	}
+
+	//#endregion
+
+	validate_a11y_click_events() {
+		// Check if the element has onclick
+		if (!this.attributes.some(attr => attr.name.toLowerCase() === 'onclick')) return;
+
+		// Check if element is hidden from screen reader.
+		if (this.is_hidden_from_screen_reader()) return;
+
+		// TODO: check if interactive element (might be tricky...)
+		if (this.is_interactive()) return;
+
+		// Visible, non-interactive elements with click handlers require one keyboard event listener.
+		if (!this.attributes.some(attr => a11y_click_events_key_events.has(attr.name))) {
+			this.component.warn(this, {
+				code: `a11y-click-events-have-key-events`,
+				message: `A11y: Visible, non-interactive elements with click handlers must have at least one keyboard listener.`
+			});		
+		}
 	}
 
 	is_media_node() {

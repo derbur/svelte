@@ -812,31 +812,41 @@ export default class Element extends Node {
 		.concat('toolbar')
 	);
 
-	interactiveRoleSchemas = [...elementRoles]
-		.reduce((
-			accumulator,
-			[
-				elementSchema,
-				roleSet,
-			],
-			) => {
-				if (this.name === 'details')
-					console.log(elementSchema, roleSet);
-			if ([...roleSet].some(role => {
-				this.interactiveRoles.has(role);
-			})) {
-				accumulator.push(elementSchema);
-			}
-			return accumulator;
-		}, []);
+	nonInteractiveRoles = new Set([...roles.keys()]
+		.filter(name => {
+			const role = roles.get(name);
+			return (
+				!role.abstract
+					// 'toolbar' does not descend from widget, but it does support
+					// aria-activedescendant, thus in practice we treat it as a widget.
+					&& name !== 'toolbar'
+					&& !role.superClass.some((classes) => classes.includes('widget'))
+			);
+		}).concat(
+			// The `progressbar` is descended from `widget`, but in practice, its
+			// value is always `readonly`, so we treat it as a non-interactive role.
+			'progressbar',
+		)
+	);
+
+	elementRoleEntries = [...elementRoles];
+
+	interactiveRoleSchemas = this.elementRoleEntries.reduce((accumulator,	[	elementSchema, roleSet	]) => {
+		if ([...roleSet].some(role => this.interactiveRoles.has(role))) {
+			accumulator.push(elementSchema);
+		}
+		return accumulator;
+	}, []);	
+
+	nonInteractiveElementRoleSchemas = this.elementRoleEntries.reduce((accumulator,	[	elementSchema, roleSet ]) => {
+		if ([...roleSet].every(role => this.nonInteractiveRoles.has(role))) {
+			accumulator.push(elementSchema);
+		}
+		return accumulator;
+	}, []);
 
 	is_interactive() {
-		if (this.name === 'details') {
-			console.log(this.interactiveRoleSchemas);
-			console.log(this.interactiveRoles);
-		}
-		const attribute_comparator = (baseAttributes, attributes: Attribute[]) => {
-			if (this.name === 'details') console.log(baseAttributes);
+		const attribute_comparator = (baseAttributes = [], attributes: Attribute[]) => {
 			baseAttributes.every(baseAttr => {
 				attributes.some(attr => {
 					// Attributes do not match.
@@ -860,9 +870,19 @@ export default class Element extends Node {
 		};
 
 		const isInherentlyInteractive = this.interactiveRoleSchemas.some(schema_matcher);
+
 		if (isInherentlyInteractive) {
 			return true;
 		}
+
+		// TODO: Gotta keep going with this action!! 👍
+		const isInherentlyNonInteractive = this.nonInteractiveElementRoleSchemas.some(schema_matcher);
+
+		if (isInherentlyNonInteractive) {
+			return false;
+		}
+
+		return false;
 	}
 
 	//#endregion

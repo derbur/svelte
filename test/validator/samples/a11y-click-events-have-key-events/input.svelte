@@ -10,6 +10,4 @@
 
 <div onClick={() => {}} />
 
-<details onClick={() => {}}>
-  This is a details block
-</details>
+<details onClick={() => {}}>This is a details block</details>
